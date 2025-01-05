@@ -356,18 +356,22 @@ _ALWAYS_INLINE inline void apply(Fn& f, Args&&...args) {
     (void)_helper;
 }
 
+enum {root, child};
+
 #define MSG_2_STRUCT(...) \
-static constexpr int is_msg_2_struct = 1; \
+static constexpr int is_msg_2_struct = msg2struct::impl::root; \
 template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {msg2struct::impl::apply(_, __VA_ARGS__);} \
 template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {msg2struct::impl::apply(_, __VA_ARGS__);}
 
 #define MSG_2_STRUCT_INHERIT(parent, ...) \
-template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);} \
-template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);}
+static constexpr int is_msg_2_struct = msg2struct::impl::child; \
+using msg_2_parent = parent; \
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {msg2struct::impl::apply(_, __VA_ARGS__);} \
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {msg2struct::impl::apply(_, __VA_ARGS__);}
 
 template<typename T>
 struct ParseHelper {
-    Iterator it;
+    Iterator& it;
     bool err;
     template<typename U>
     void operator()(U& field) {
@@ -383,16 +387,29 @@ struct ParseHelper {
 }
 
 // For now only tuple-like parse and dump
+template<bool> struct check {};
+template<> struct check<true> { using type = int; };
 
-template<typename T, int = T::is_msg_2_struct>
-bool Parse(T& object, Iterator it) {
+template<typename T, typename check<T::is_msg_2_struct == impl::root>::type = 1>
+bool Parse(T& object, Iterator& it) {
+    auto helper = impl::ParseHelper<T>{it, false};
+    object._msg2struct(helper);
+    return !helper.err;
+}
+
+template<typename T, typename check<T::is_msg_2_struct == impl::child>::type = 1>
+bool Parse(T& object, Iterator& it) {
+    using Parent = typename T::msg_2_parent;
+    if (!Parse(static_cast<Parent&>(object), it)) {
+        return false;
+    }
     auto helper = impl::ParseHelper<T>{it, false};
     object._msg2struct(helper);
     return !helper.err;
 }
 
 #define _PARSE_WITH(method, T) \
-inline bool Parse(T& i, Iterator it) { \
+inline bool Parse(T& i, Iterator& it) { \
     return it.method(i);  \
 }
 
@@ -409,7 +426,7 @@ _PARSE_WITH(GetUnsigned, uint64_t)
 _PARSE_WITH(GetFloat, float)
 _PARSE_WITH(GetFloat, double)
 
-inline bool Parse(String& i, Iterator it) {
+inline bool Parse(String& i, Iterator& it) {
     auto bin = it.GetComposite();
     switch (it.Type()) {
     case Headers::fixstr:
@@ -424,7 +441,7 @@ inline bool Parse(String& i, Iterator it) {
     }
 }
 
-inline bool Parse(Binary& i, Iterator it) {
+inline bool Parse(Binary& i, Iterator& it) {
     i = it.GetComposite();
     return bool(i);
 }
