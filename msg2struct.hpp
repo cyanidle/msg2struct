@@ -351,19 +351,19 @@ public:
 namespace impl {
 
 template<typename Fn, typename...Args>
-_ALWAYS_INLINE void apply(Fn& f, Args&&...args) {
+_ALWAYS_INLINE inline void apply(Fn& f, Args&&...args) {
     int _helper[] = {(f(args), 0)...};
     (void)_helper;
 }
 
 #define MSG_2_STRUCT(...) \
 static constexpr int is_msg_2_struct = 1; \
-template<typename Fn> void _msg2struct(Fn&& _) const {msg2struct::impl::apply(_, __VA_ARGS__);} \
-template<typename Fn> void _msg2struct(Fn&& _) {msg2struct::impl::apply(_, __VA_ARGS__);}
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {msg2struct::impl::apply(_, __VA_ARGS__);} \
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {msg2struct::impl::apply(_, __VA_ARGS__);}
 
 #define MSG_2_STRUCT_INHERIT(parent, ...) \
-template<typename Fn> void _msg2struct(Fn&& _) const {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);} \
-template<typename Fn> void _msg2struct(Fn&& _) {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);}
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);} \
+template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {parent::_msg2struct(_); msg2struct::impl::apply(_, __VA_ARGS__);}
 
 template<typename T>
 struct ParseHelper {
