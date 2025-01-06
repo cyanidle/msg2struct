@@ -22,11 +22,11 @@ enum class Headers {
     never_used, //  11000001 	0xc1
     invalid = never_used,
 // Fix (inline size or data)
-    fixuint,    //  0xxxx       0xe0 - 0xff,
-    fixint,     //  111xxxx     0x00 - 0x7f,
-    fixmap,     // 	1000xxxx 	0x80 - 0x8f
-    fixarray,   // 	1001xxxx 	0x90 - 0x9f
-    fixstr,     // 	101xxxxx 	0xa0 - 0xbf
+    fixuint,    //  0xxxx       0x00 - 0x7f,
+    fixint,     //  111xxxx     0xe0 - 0xff,
+    fixmap,    // 	1000xxxx 	0x80 - 0x8f
+    fixarray,  // 	1001xxxx 	0x90 - 0x9f
+    fixstr,    // 	101xxxxx 	0xa0 - 0xbf
 // Trivial
     nil,        // 	11000000 	0xc0
     hfalse,     // 	11000010 	0xc2
@@ -70,8 +70,8 @@ enum class Headers {
 };
 
 struct Binary {
-    const unsigned char* data{};
-    size_t size{};
+    const unsigned char* data;
+    size_t size;
 
     explicit operator bool() const noexcept {
         return data;
@@ -79,13 +79,26 @@ struct Binary {
 };
 
 struct String {
-    const char* str{};
-    size_t size{};
+    const char* str;
+    size_t size;
 
     explicit operator bool() const noexcept {
         return str;
     }
 };
+
+
+template<typename T> struct is_int {};
+template<> struct is_int<int8_t> { using type = int; };
+template<> struct is_int<uint8_t> { using type = int; };
+template<> struct is_int<int16_t> { using type = int; };
+template<> struct is_int<uint16_t> { using type = int; };
+template<> struct is_int<int32_t> { using type = int; };
+template<> struct is_int<uint32_t> { using type = int; };
+template<> struct is_int<int64_t> { using type = int; };
+template<> struct is_int<uint64_t> { using type = int; };
+template<bool> struct check {};
+template<> struct check<true> { using type = int; };
 
 namespace impl {
 
@@ -125,11 +138,11 @@ inline Headers header(unsigned char byte) {
     case 0xde: return Headers::map16;
     case 0xdf: return Headers::map32;
     default:
-        if ((byte & (1 << 7)) == 0) return Headers::fixint;
-        if ((byte & (7 << 5)) == (7 << 5)) return Headers::fixuint;
-        if ((byte & (15 << 4)) == (1 << 7)) return Headers::fixmap;
-        if ((byte & (15 << 4)) == (9 << 4)) return Headers::fixarray;
-        if ((byte & (7 << 5)) == (5 << 5)) return Headers::fixstr;
+        if (0x00 <= byte && byte <= 0x7f) return Headers::fixuint;
+        if (0xe0 <= byte && byte <= 0xff) return Headers::fixint;
+        if (0x80 <= byte && byte <= 0x8f) return Headers::fixmap;
+        if (0x90 <= byte && byte <= 0x9f) return Headers::fixarray;
+        if (0xa0 <= byte && byte <= 0xbf) return Headers::fixstr;
         abort();
     }
 }
@@ -172,36 +185,70 @@ inline size_t headerSizeof(Headers type) {
     }
 }
 
+template<typename T, typename check<sizeof(T) == 1>::type = 1>
+_ALWAYS_INLINE inline T bswap(T val) noexcept {return val;}
+template<typename T, typename check<sizeof(T) == 2>::type = 1>
+_ALWAYS_INLINE inline T bswap(T& val) noexcept {
+    auto temp = __bswap_16(*reinterpret_cast<uint16_t*>(&val));
+    return *reinterpret_cast<T*>(&temp);
+}
+template<typename T, typename check<sizeof(T) == 4>::type = 1>
+_ALWAYS_INLINE inline T bswap(T val) noexcept {
+    auto temp = __bswap_32(*reinterpret_cast<uint32_t*>(&val));
+    return *reinterpret_cast<T*>(&temp);
+}
+template<typename T, typename check<sizeof(T) == 8>::type = 1>
+_ALWAYS_INLINE inline T bswap(T val) noexcept {
+    auto temp = __bswap_64(*reinterpret_cast<uint64_t*>(&val));
+    return *reinterpret_cast<T*>(&temp);
+}
+
+template<typename T>
+_ALWAYS_INLINE inline T from_big(T val) {
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    return bswap(val);
+#endif
+}
+
+template<typename T>
+_ALWAYS_INLINE inline T to_big(T val) {
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    return bswap(val);
+#endif
+}
+
 template<typename T>
 void getTrivial(T& v, const unsigned char* data) {
     memcpy(&v, data, sizeof(v));
-    if (sizeof(T) == 2) v = T(be16toh(uint16_t(v)));
-    if (sizeof(T) == 4) v = T(be32toh(uint32_t(v)));
-    if (sizeof(T) == 8) v = T(be64toh(uint64_t(v)));
+    v = from_big(v);
 }
 
 template<typename T, typename U>
 bool getTrivialWith(U& out, const unsigned char* data, size_t size) {
     T v;
-    if (size <= sizeof(v)) return false;
-    impl::getTrivial(v, data);
+    if (size < (sizeof(v) + 1)) return false;
+    impl::getTrivial(v, data + 1);
     out = T(v);
+    if (out > 0 != v > 0) return false; //sign missmatch
+    if (sizeof(T) > sizeof(out)) {
+        if (v != T(out)) return false; //overflow
+    }
     return true;
 }
 
-template<typename SizeT>
-void getComposite(Binary& result, const unsigned char* data, size_t size, size_t add) {
-    uint32_t sz;
-    if (size <= sizeof(sz) + add) return;
-    impl::getTrivial(sz, data);
-    if (size <= sizeof(sz) + sz + add) return;
+template<typename SizeT, size_t add = 0>
+void getComposite(Binary& result, const unsigned char* data, size_t size) {
+    SizeT sz;
+    if (size <= 1 + sizeof(sz) + add) return;
+    impl::getTrivial(sz, data + 1);
+    if (size <= 1 + sizeof(sz) + sz + add) return;
     result.data = data + sizeof(sz) + 1 + add;
-    result.size = sz;
+    result.size = sz + add;
 }
 
 } //impl
 
-class Iterator {
+class InIterator {
     const unsigned char* data;
     size_t size;
     Headers type;
@@ -214,38 +261,46 @@ public:
         return type;
     }
 
-    Iterator() noexcept : type(Headers::invalid) {}
+    InIterator() noexcept : type(Headers::invalid) {}
 
-    static Iterator InvalidAt(const unsigned char* point) noexcept {
-        Iterator it;
+    static InIterator InvalidAt(const unsigned char* point) noexcept {
+        InIterator it;
         it.data = point;
         return it;
     }
 
-    Iterator(const unsigned char* _data, size_t _size) noexcept : data(_data), size(_size) {
+    InIterator(const unsigned char* _data, size_t _size) noexcept : data(_data), size(_size) {
         type = _size ? impl::header(_data[0]) : Headers::invalid;
     }
 
     _FLATTEN Binary GetComposite() const noexcept {
-        Binary result;
-        bool isExt = type >= Headers::ext8 && type <= Headers::ext32;
+        Binary result{};
         switch(type) {
-        case Headers::ext32:
+        case Headers::ext32: {
+            impl::getComposite<uint32_t, 1>(result, data, size);
+            return result;
+        }
         case Headers::bin32:
         case Headers::str32: {
-            impl::getComposite<uint32_t>(result, data, size, isExt);
+            impl::getComposite<uint32_t>(result, data, size);
             return result;
         }
-        case Headers::ext16:
+        case Headers::ext16: {
+            impl::getComposite<uint16_t, 1>(result, data, size);
+            return result;
+        }
         case Headers::bin16:
         case Headers::str16: {
-            impl::getComposite<uint16_t>(result, data, size, isExt);
+            impl::getComposite<uint16_t>(result, data, size);
             return result;
         }
-        case Headers::ext8:
+        case Headers::ext8: {
+            impl::getComposite<uint8_t, 1>(result, data, size);
+            return result;
+        }
         case Headers::bin8:
         case Headers::str8: {
-            impl::getComposite<uint8_t>(result, data, size, isExt);
+            impl::getComposite<uint8_t>(result, data, size);
             return result;
         }
 #if MSG_2_STRUCT_FIXEXT
@@ -264,27 +319,23 @@ public:
     }
 
     template<typename T>
-    _FLATTEN bool GetUnsigned(T& out) const noexcept {
+    _FLATTEN bool GetInteger(T& out) const noexcept {
         switch(type) {
         case Headers::fixuint: {
             out = T(uint8_t(data[0]));
+            return true;
+        }
+        case Headers::fixint: {
+            auto v = int8_t(data[0]);
+            out = T(v);
+            if (out > 0 != v > 0) return false;
             return true;
         }
         case Headers::uint8: return impl::getTrivialWith<uint8_t>(out, data, size);
         case Headers::uint16: return impl::getTrivialWith<uint16_t>(out, data, size);
         case Headers::uint32: return impl::getTrivialWith<uint32_t>(out, data, size);
         case Headers::uint64: return impl::getTrivialWith<uint64_t>(out, data, size);
-        default: return false;
-        }
-    }
 
-    template<typename T>
-    _FLATTEN bool GetSigned(T& out) const noexcept {
-        switch(type) {
-        case Headers::fixint: {
-            out = T(int8_t(data[0]));
-            return true;
-        }
         case Headers::int8: return impl::getTrivialWith<int8_t>(out, data, size);
         case Headers::int16: return impl::getTrivialWith<int16_t>(out, data, size);
         case Headers::int32: return impl::getTrivialWith<int32_t>(out, data, size);
@@ -298,7 +349,9 @@ public:
         switch(type) {
         case Headers::float32: return impl::getTrivialWith<float>(out, data, size);
         case Headers::float64: return impl::getTrivialWith<double>(out, data, size);
-        default: return false;
+        default: {
+            return GetInteger(out);
+        }
         }
     }
 
@@ -341,10 +394,155 @@ public:
         return IsValid();
     }
 
-    Iterator Peek() const noexcept {
-        Iterator temp = *this;
+    InIterator Peek() const noexcept {
+        InIterator temp = *this;
         temp.Next();
         return temp;
+    }
+};
+
+namespace impl {
+
+template<typename T>
+void writeTrivialUnch(T val, unsigned char*& buffer, size_t& size) {
+    val = to_big(val);
+    memcpy(buffer, &val, sizeof(T));
+    buffer += sizeof(T);
+    size -= sizeof(T);
+}
+
+template<typename T>
+bool writeTypedTrivial(unsigned char type, T val, unsigned char*& buffer, size_t& size) {
+    constexpr int step = sizeof(T) + 1;
+    if (size < step) return false;
+    buffer[0] = type;
+    buffer += 1;
+    size -= 1;
+    writeTrivialUnch(val, buffer, size);
+    return true;
+}
+
+_ALWAYS_INLINE _FLATTEN
+inline bool writeNegInt(int64_t i, unsigned char*& buffer, size_t& size) {
+    if (i >= -32) {
+        if (!size) return false;
+        buffer[0] = (unsigned char)(int8_t(i));
+        buffer += 1;
+        size -= 1;
+        return true;
+    }
+    else if (i >= INT8_MIN)
+        return writeTypedTrivial(0xD0, int8_t(i), buffer, size);
+    else if (i >= INT16_MIN)
+        return writeTypedTrivial(0xD1, int16_t(i), buffer, size);
+    else if (i >= INT32_MIN)
+        return writeTypedTrivial(0xD2, int32_t(i), buffer, size);
+    else
+        return writeTypedTrivial(0xD3, int64_t(i), buffer, size);
+}
+
+_ALWAYS_INLINE _FLATTEN
+inline bool writePosInt(uint64_t i, unsigned char*& buffer, size_t& size) {
+    if (i < 128) {
+        if (!size) return false;
+        buffer[0] = (unsigned char)(uint8_t(i));
+        buffer += 1;
+        size -= 1;
+        return true;
+    }
+    else if (i <= UINT8_MAX)
+        return writeTypedTrivial(0xCC, uint8_t(i), buffer, size);
+    else if (i <= UINT16_MAX)
+        return writeTypedTrivial(0xCD, uint16_t(i), buffer, size);
+    else if (i <= UINT32_MAX)
+        return writeTypedTrivial(0xCE, uint32_t(i), buffer, size);
+    else
+        return writeTypedTrivial(0xCF, uint64_t(i), buffer, size);
+}
+
+template<int _8, int _16, int _32>
+inline bool writeComposite(Binary comp, unsigned char*& buffer, size_t& size) {
+    if (comp.size <= UINT8_MAX) {
+        if (!writeTypedTrivial(_8, uint8_t(comp.size), buffer, size)) {
+            return false;
+        }
+    } else if (comp.size <= UINT16_MAX) {
+        if (!writeTypedTrivial(_16, uint16_t(comp.size), buffer, size)) {
+            return false;
+        }
+    } else {
+        if (!writeTypedTrivial(_32, uint32_t(comp.size), buffer, size)) {
+            return false;
+        }
+    }
+    if (size < comp.size) return false;
+    memcpy(buffer, comp.data, comp.size);
+    buffer += comp.size;
+    size -= comp.size;
+    return true;
+}
+
+
+}
+
+class OutIterator {
+public:
+    unsigned char* buffer;
+    size_t size;
+
+    OutIterator(unsigned char* _buffer, size_t size) noexcept :
+        buffer(_buffer), size(size)
+    {}
+
+    // TODO: extensions, objects?
+
+    bool BeginArray(size_t _sz) noexcept {
+        if (_sz <= 15) {
+            if (!size) return false;
+            size -= 1;
+            buffer[0] = 0x90 | _sz;
+            buffer += 1;
+            return true;
+        } else if (size <= UINT16_MAX) {
+            return impl::writeTypedTrivial(0xdc, uint16_t(_sz), buffer, size);
+        } else {
+            return impl::writeTypedTrivial(0xdd, uint32_t(_sz), buffer, size);
+        }
+    }
+
+    bool WriteComposite(Binary bin) noexcept {
+        return impl::writeComposite<0xc4, 0xc5, 0xc6>(bin, buffer, size);
+    }
+    bool WriteComposite(String str) noexcept {
+        Binary b{};
+        b.data = (const unsigned char*)str.str;
+        b.size = str.size;
+        if (b.size <= 31) { //fixstr
+            if (size < 1 + b.size) return false;
+            buffer[0] = 0xA0 | b.size;
+            buffer += 1;
+            size -= 1;
+            memcpy(buffer, b.data, b.size);
+            buffer += b.size;
+            size -= b.size;
+            return true;
+        } else {
+            return impl::writeComposite<0xd9, 0xda, 0xdb>(b, buffer, size);
+        }
+    }
+    bool WriteFloat(float value) noexcept {
+        return impl::writeTypedTrivial(0xca, value, buffer, size);
+    }
+    bool WriteFloat(double value) noexcept {
+        return impl::writeTypedTrivial(0xcb, value, buffer, size);
+    }
+    template<typename T>
+    bool WriteInteger(T value) noexcept {
+        if (!(value >= 0)) {
+            return impl::writeNegInt(int64_t(value), buffer, size);
+        } else {
+            return impl::writePosInt(uint64_t(value), buffer, size);
+        }
     }
 };
 
@@ -369,9 +567,29 @@ using msg_2_parent = parent; \
 template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) const {msg2struct::impl::apply(_, __VA_ARGS__);} \
 template<typename Fn> _ALWAYS_INLINE inline void _msg2struct(Fn&& _) {msg2struct::impl::apply(_, __VA_ARGS__);}
 
-template<typename T>
+struct Counter {
+    size_t count{};
+    template<typename U>
+    void operator()(U&) {count++;}
+};
+
+template<typename T, typename check<T::is_msg_2_struct == impl::root>::type = 1>
+size_t countFields(T const& val) {
+    auto counter = impl::Counter{};
+    val._msg2struct(counter);
+    return counter.count;
+}
+
+template<typename T, typename check<T::is_msg_2_struct == impl::child>::type = 1>
+size_t countFields(T const& val) {
+    auto& asParent = static_cast<const typename T::msg_2_parent&>(val);
+    auto counter = impl::Counter{};
+    val._msg2struct(counter);
+    return countFields(asParent) + counter.count;
+}
+
 struct ParseHelper {
-    Iterator& it;
+    InIterator& it;
     bool err;
     template<typename U>
     void operator()(U& field) {
@@ -386,64 +604,149 @@ struct ParseHelper {
 };
 }
 
-// For now only tuple-like parse and dump
-template<bool> struct check {};
-template<> struct check<true> { using type = int; };
-
+// For now only tuple-like parse and dump (we ca use impl::type) to switch
 template<typename T, typename check<T::is_msg_2_struct == impl::root>::type = 1>
-bool Parse(T& object, Iterator& it) {
-    auto helper = impl::ParseHelper<T>{it, false};
-    object._msg2struct(helper);
+bool Parse(T& val, InIterator& it, bool fromChild = false) {
+    size_t tail = 0;
+    if (!fromChild) {
+        auto fs = impl::countFields(val);
+        auto sz = it.GetArraySize();
+        if (sz < fs) return false;
+        it.Next();
+        tail = sz - fs;
+    }
+    auto helper = impl::ParseHelper{it, false};
+    val._msg2struct(helper);
+    if (!helper.err && !fromChild) {
+        for (size_t i = 0; i < tail; ++i) it.Next();
+    }
     return !helper.err;
 }
+
+// Customizable:
 
 template<typename T, typename check<T::is_msg_2_struct == impl::child>::type = 1>
-bool Parse(T& object, Iterator& it) {
-    using Parent = typename T::msg_2_parent;
-    if (!Parse(static_cast<Parent&>(object), it)) {
+bool Parse(T& val, InIterator& it, bool fromChild = false) {
+    size_t tail = 0;
+    if (!fromChild) {
+        auto fs = impl::countFields(val);
+        auto sz = it.GetArraySize();
+        if (sz < fs) return false;
+        it.Next();
+        tail = sz - fs;
+    }
+    auto& asParent = static_cast<typename T::msg_2_parent&>(val);
+    if (!Parse(asParent, it, true)) {
         return false;
     }
-    auto helper = impl::ParseHelper<T>{it, false};
-    object._msg2struct(helper);
+    auto helper = impl::ParseHelper{it, false};
+    val._msg2struct(helper);
+    if (!helper.err && !fromChild) {
+        for (size_t i = 0; i < tail; ++i) it.Next();
+    }
     return !helper.err;
 }
 
-#define _PARSE_WITH(method, T) \
-inline bool Parse(T& i, Iterator& it) { \
-    return it.method(i);  \
+template<typename T, typename is_int<T>::type = 1>
+bool Parse(T& val, InIterator& it) {
+    return it.GetInteger(val);
 }
 
-_PARSE_WITH(GetSigned, int8_t)
-_PARSE_WITH(GetSigned, int16_t)
-_PARSE_WITH(GetSigned, int32_t)
-_PARSE_WITH(GetSigned, int64_t)
+inline bool Parse(float& val, InIterator& it) {
+    return it.GetFloat(val);
+}
 
-_PARSE_WITH(GetUnsigned, uint8_t)
-_PARSE_WITH(GetUnsigned, uint16_t)
-_PARSE_WITH(GetUnsigned, uint32_t)
-_PARSE_WITH(GetUnsigned, uint64_t)
+inline bool Parse(double& val, InIterator& it) {
+    return it.GetFloat(val);
+}
 
-_PARSE_WITH(GetFloat, float)
-_PARSE_WITH(GetFloat, double)
-
-inline bool Parse(String& i, Iterator& it) {
-    auto bin = it.GetComposite();
+inline bool Parse(String& val, InIterator& it) {
     switch (it.Type()) {
     case Headers::fixstr:
     case Headers::str8:
     case Headers::str16:
-    case Headers::str32:
-        i.size = bin.size;
-        i.str = (const char*)bin.data;
-        return bool(i);
+    case Headers::str32: {
+        auto bin = it.GetComposite();
+        val.size = bin.size;
+        val.str = (const char*)bin.data;
+        return bool(val);
+    }
     default:
         return false;
     }
 }
 
-inline bool Parse(Binary& i, Iterator& it) {
-    i = it.GetComposite();
-    return bool(i);
+inline bool Parse(Binary& val, InIterator& it) {
+    val = it.GetComposite();
+    return bool(val);
+}
+
+// Dump
+namespace impl {
+
+struct DumpHelper {
+    OutIterator& it;
+    bool err;
+    template<typename U>
+    void operator()(U& field) {
+        if (err) return;
+        if (!Dump(field, it)) {
+            err = true;
+        }
+    }
+};
+
+}
+
+template<typename T, typename check<T::is_msg_2_struct == impl::root>::type = 1>
+bool Dump(T const& val, OutIterator& it, bool fromChild = false) {
+    if (!fromChild) {
+        auto fs = impl::countFields(val);
+        if (!it.BeginArray(fs)) {
+            return false;
+        }
+    }
+    auto helper = impl::DumpHelper{it, false};
+    val._msg2struct(helper);
+    return !helper.err;
+}
+
+template<typename T, typename check<T::is_msg_2_struct == impl::child>::type = 1>
+bool Dump(T const& val, OutIterator& it, bool fromChild = false) {
+    if (!fromChild) {
+        auto fs = impl::countFields(val);
+        if (!it.BeginArray(fs)) {
+            return false;
+        }
+    }
+    auto& asParent = static_cast<const typename T::msg_2_parent&>(val);
+    if (!Dump(asParent, it, true)) {
+        return false;
+    }
+    auto helper = impl::DumpHelper{it, false};
+    val._msg2struct(helper);
+    return !helper.err;
+}
+
+template<typename T, typename is_int<T>::type = 1>
+bool Dump(T val, OutIterator& it) {
+    return it.WriteInteger(val);
+}
+
+inline bool Dump(float val, OutIterator& it) {
+    return it.WriteFloat(val);
+}
+
+inline bool Dump(double val, OutIterator& it) {
+    return it.WriteFloat(val);
+}
+
+inline bool Dump(String val, OutIterator& it) {
+    return it.WriteComposite(val);
+}
+
+inline bool Dump(Binary val, OutIterator& it) {
+    return it.WriteComposite(val);
 }
 
 } //msg2struct

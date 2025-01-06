@@ -1,9 +1,8 @@
 #include "msg2struct.hpp"
 
-
 struct Msg {
     int a;
-    int b;
+    float b;
     MSG_2_STRUCT(a, b);
 };
 
@@ -13,15 +12,21 @@ struct Msg2 : Msg {
 };
 
 struct Msg3 : Msg2 {
-    msg2struct::String string;
-    MSG_2_STRUCT_INHERIT(Msg2, string);
+    msg2struct::Binary bin;
+    MSG_2_STRUCT_INHERIT(Msg2, bin);
 };
 
 int main() {
-    unsigned char buff[] = {0x94, 0x7B, 0x14, 0xA5, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0xA5, 0x68, 0x65, 0x6C, 0x6C, 0x6F};
-    auto it = msg2struct::Iterator(buff, sizeof(buff));
-    it.Next();
+    unsigned char buff[200];
     Msg3 msg;
-    auto ok = msg2struct::Parse(msg, it);
-    return !ok;
+    msg.a = -23;
+    msg.b = 1.5;
+    msg.string = {"hello", 5};
+    msg.bin = {(const unsigned char*)"world", 5};
+    Msg3 msgBack;
+    msg2struct::OutIterator oit(buff, sizeof(buff));
+    auto outOk = msg2struct::Dump(msg, oit);
+    msg2struct::InIterator it(buff, sizeof(buff));
+    auto ok = msg2struct::Parse(msgBack, it);
+    return ok == outOk;
 }
