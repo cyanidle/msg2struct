@@ -16,6 +16,9 @@ struct Msg3 : Msg2 {
     MSG_2_STRUCT_INHERIT(Msg2, bin);
 };
 
+// TODO: TAGS in struct (first value of Array or special field in object to identify type + let user check it)
+// Simpler: We send a PAIR of msgpacks instead of single object. Iter API for that
+
 int main() {
     unsigned char buff[200];
     Msg3 msg;
