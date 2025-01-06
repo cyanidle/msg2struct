@@ -147,7 +147,7 @@ inline Headers header(unsigned char byte) {
     }
 }
 
-inline size_t headerSizeof(Headers type) {
+inline size_t nonCompositeSizeof(Headers type) {
     switch (type) {
     default:
         return 1; //trivial 1 byte (inline or fix*)
@@ -273,35 +273,35 @@ public:
         type = _size ? impl::header(_data[0]) : Headers::invalid;
     }
 
-    _FLATTEN Binary GetComposite() const noexcept {
+    _FLATTEN Binary GetComposite() noexcept {
         Binary result{};
         switch(type) {
         case Headers::ext32: {
             impl::getComposite<uint32_t, 1>(result, data, size);
-            return result;
+            break;
         }
         case Headers::bin32:
         case Headers::str32: {
             impl::getComposite<uint32_t>(result, data, size);
-            return result;
+            break;
         }
         case Headers::ext16: {
             impl::getComposite<uint16_t, 1>(result, data, size);
-            return result;
+            break;
         }
         case Headers::bin16:
         case Headers::str16: {
             impl::getComposite<uint16_t>(result, data, size);
-            return result;
+            break;
         }
         case Headers::ext8: {
             impl::getComposite<uint8_t, 1>(result, data, size);
-            return result;
+            break;
         }
         case Headers::bin8:
         case Headers::str8: {
             impl::getComposite<uint8_t>(result, data, size);
-            return result;
+            break;
         }
 #if MSG_2_STRUCT_FIXEXT
         //TODO
@@ -311,66 +311,115 @@ public:
             if (size <= len) return result;
             result.data = data + 1;
             result.size = len;
-            return result;
+            break;
         }
         default:
-            return result;
+            break;
         }
+        if (result) {
+            auto step = impl::nonCompositeSizeof(type) + result.size;
+            advance(step);
+        }
+        return result;
     }
 
     template<typename T>
-    _FLATTEN bool GetInteger(T& out) const noexcept {
+    _FLATTEN bool GetInteger(T& out) noexcept {
+        bool ok = false;
         switch(type) {
         case Headers::fixuint: {
             out = T(uint8_t(data[0]));
+            advance(1);
             return true;
         }
         case Headers::fixint: {
             auto v = int8_t(data[0]);
             out = T(v);
             if (out > 0 != v > 0) return false;
+            advance(1);
             return true;
         }
-        case Headers::uint8: return impl::getTrivialWith<uint8_t>(out, data, size);
-        case Headers::uint16: return impl::getTrivialWith<uint16_t>(out, data, size);
-        case Headers::uint32: return impl::getTrivialWith<uint32_t>(out, data, size);
-        case Headers::uint64: return impl::getTrivialWith<uint64_t>(out, data, size);
-
-        case Headers::int8: return impl::getTrivialWith<int8_t>(out, data, size);
-        case Headers::int16: return impl::getTrivialWith<int16_t>(out, data, size);
-        case Headers::int32: return impl::getTrivialWith<int32_t>(out, data, size);
-        case Headers::int64: return impl::getTrivialWith<int64_t>(out, data, size);
-        default: return false;
+        case Headers::uint8: {
+            ok = impl::getTrivialWith<uint8_t>(out, data, size);
+            break;
         }
+        case Headers::uint16: {
+            ok = impl::getTrivialWith<uint16_t>(out, data, size);
+            break;
+        }
+        case Headers::uint32: {
+            ok = impl::getTrivialWith<uint32_t>(out, data, size);
+            break;
+        }
+        case Headers::uint64: {
+            ok = impl::getTrivialWith<uint64_t>(out, data, size);
+            break;
+        }
+
+        case Headers::int8: {
+            ok = impl::getTrivialWith<int8_t>(out, data, size);
+            break;
+        }
+        case Headers::int16: {
+            ok = impl::getTrivialWith<int16_t>(out, data, size);
+            break;
+        }
+        case Headers::int32: {
+            ok = impl::getTrivialWith<int32_t>(out, data, size);
+            break;
+        }
+        case Headers::int64: {
+            ok = impl::getTrivialWith<int64_t>(out, data, size);
+            break;
+        }
+        default: break;
+        }
+        if (ok) {
+            advance(impl::nonCompositeSizeof(type));
+        }
+        return ok;
     }
 
     template<typename T>
-    _FLATTEN bool GetFloat(T& out) const noexcept {
+    _FLATTEN bool GetFloat(T& out) noexcept {
         switch(type) {
-        case Headers::float32: return impl::getTrivialWith<float>(out, data, size);
-        case Headers::float64: return impl::getTrivialWith<double>(out, data, size);
+        case Headers::float32: {
+            auto ok = impl::getTrivialWith<float>(out, data, size);
+            if (ok) advance(5);
+            return ok;
+        }
+        case Headers::float64: {
+            auto ok = impl::getTrivialWith<double>(out, data, size);
+            if (ok) advance(9);
+            return ok;
+        }
         default: {
             return GetInteger(out);
         }
         }
     }
 
-    size_t GetArraySize() const noexcept {
+    size_t GetArraySize() noexcept {
         switch(type) {
         case Headers::array16: {
             uint16_t sz;
             if (size <= 2) return size_t(-1);
             impl::getTrivial(sz, data);
+            advance(3);
             return size_t(sz);
         }
         case Headers::array32: {
             uint32_t sz;
             if (size <= 4) return size_t(-1);
             impl::getTrivial(sz, data);
+            advance(5);
             return size_t(sz);
         }
         case Headers::fixarray: {
-            return size_t(data[0] & 15);
+            if (!size) return size_t(-1);
+            auto res = size_t(data[0] & 15);
+            advance(1);
+            return res;
         }
         default:
             return size_t(-1);
@@ -383,21 +432,19 @@ public:
 
     bool Next() noexcept {
         if (!IsValid()) return false;
-        auto step = impl::headerSizeof(type) + GetComposite().size;
+        auto step = impl::nonCompositeSizeof(type) + GetComposite().size;
+        advance(step);
+        return true;
+    }
+private:
+    void advance(size_t step) {
         if (step >= size) {
             type = Headers::invalid;
-            return false;
+        } else {
+            size -= step;
+            data += step;
+            type = impl::header(data[0]);
         }
-        size -= step;
-        data += step;
-        type = impl::header(data[0]);
-        return IsValid();
-    }
-
-    InIterator Peek() const noexcept {
-        InIterator temp = *this;
-        temp.Next();
-        return temp;
     }
 };
 
@@ -593,12 +640,9 @@ struct ParseHelper {
     bool err;
     template<typename U>
     void operator()(U& field) {
-        if (!it.IsValid()) return;
+        if (err) return;
         if (!Parse(field, it)) {
             err = true;
-            it = {};
-        } else {
-            it.Next();
         }
     }
 };
@@ -612,7 +656,6 @@ bool Parse(T& val, InIterator& it, bool fromChild = false) {
         auto fs = impl::countFields(val);
         auto sz = it.GetArraySize();
         if (sz < fs) return false;
-        it.Next();
         tail = sz - fs;
     }
     auto helper = impl::ParseHelper{it, false};
@@ -632,7 +675,6 @@ bool Parse(T& val, InIterator& it, bool fromChild = false) {
         auto fs = impl::countFields(val);
         auto sz = it.GetArraySize();
         if (sz < fs) return false;
-        it.Next();
         tail = sz - fs;
     }
     auto& asParent = static_cast<typename T::msg_2_parent&>(val);

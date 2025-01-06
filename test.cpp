@@ -28,5 +28,5 @@ int main() {
     auto outOk = msg2struct::Dump(msg, oit);
     msg2struct::InIterator it(buff, sizeof(buff));
     auto ok = msg2struct::Parse(msgBack, it);
-    return ok == outOk;
+    return !(ok && outOk);
 }
