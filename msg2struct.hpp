@@ -6,7 +6,11 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
-#include <endian.h>
+#if __has_include(<endian.h>)
+    #include <endian.h>
+#elif !defined(__BYTE_ORDER) || !defined(__LITTLE_ENDIAN)
+    #error "__BYTE_ORDER and __LITTLE_ENDIAN must be defined"
+#endif
 
 #ifndef MSG_2_STRUCT_EXT //support for ext msgpack types
 #define MSG_2_STRUCT_EXT 1
@@ -193,17 +197,17 @@ template<typename T, typename check<sizeof(T) == 1>::type = 1>
 _ALWAYS_INLINE inline T bswap(T val) noexcept {return val;}
 template<typename T, typename check<sizeof(T) == 2>::type = 1>
 _ALWAYS_INLINE inline T bswap(T& val) noexcept {
-    auto temp = __bswap_16(*reinterpret_cast<uint16_t*>(&val));
+    auto temp = __builtin_bswap16(*reinterpret_cast<uint16_t*>(&val));
     return *reinterpret_cast<T*>(&temp);
 }
 template<typename T, typename check<sizeof(T) == 4>::type = 1>
 _ALWAYS_INLINE inline T bswap(T val) noexcept {
-    auto temp = __bswap_32(*reinterpret_cast<uint32_t*>(&val));
+    auto temp = __builtin_bswap32(*reinterpret_cast<uint32_t*>(&val));
     return *reinterpret_cast<T*>(&temp);
 }
 template<typename T, typename check<sizeof(T) == 8>::type = 1>
 _ALWAYS_INLINE inline T bswap(T val) noexcept {
-    auto temp = __bswap_64(*reinterpret_cast<uint64_t*>(&val));
+    auto temp = __builtin_bswap64(*reinterpret_cast<uint64_t*>(&val));
     return *reinterpret_cast<T*>(&temp);
 }
 
