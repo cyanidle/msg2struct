@@ -569,12 +569,15 @@ class OutIterator {
 public:
     unsigned char* buffer;
     size_t size;
+    size_t initial;
 
     OutIterator(unsigned char* _buffer, size_t size) noexcept :
-        buffer(_buffer), size(size)
+        buffer(_buffer), size(size), initial(size)
     {}
 
-    // TODO: extensions, objects?
+    size_t Written() const noexcept {
+        return initial - size;
+    }
 
     bool BeginArray(size_t _sz) noexcept {
         if (_sz <= 15) {
