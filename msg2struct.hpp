@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <endian.h>
 
+#ifndef MSG_2_STRUCT_EXT //support for ext msgpack types
+#define MSG_2_STRUCT_EXT 1
+#endif
+
 #ifndef MSG_2_STRUCT_FIXEXT //support for fixext msgpack types
 #define MSG_2_STRUCT_FIXEXT 1
 #endif
@@ -276,17 +280,9 @@ public:
     _FLATTEN Binary GetComposite() noexcept {
         Binary result{};
         switch(type) {
-        case Headers::ext32: {
-            impl::getComposite<uint32_t, 1>(result, data, size);
-            break;
-        }
         case Headers::bin32:
         case Headers::str32: {
             impl::getComposite<uint32_t>(result, data, size);
-            break;
-        }
-        case Headers::ext16: {
-            impl::getComposite<uint16_t, 1>(result, data, size);
             break;
         }
         case Headers::bin16:
@@ -294,15 +290,25 @@ public:
             impl::getComposite<uint16_t>(result, data, size);
             break;
         }
-        case Headers::ext8: {
-            impl::getComposite<uint8_t, 1>(result, data, size);
-            break;
-        }
         case Headers::bin8:
         case Headers::str8: {
             impl::getComposite<uint8_t>(result, data, size);
             break;
         }
+#if MSG_2_STRUCT_EXT
+        case Headers::ext8: {
+            impl::getComposite<uint8_t, 1>(result, data, size);
+            break;
+        }
+        case Headers::ext16: {
+            impl::getComposite<uint16_t, 1>(result, data, size);
+            break;
+        }
+        case Headers::ext32: {
+            impl::getComposite<uint32_t, 1>(result, data, size);
+            break;
+        }
+#endif
 #if MSG_2_STRUCT_FIXEXT
         //TODO
 #endif
