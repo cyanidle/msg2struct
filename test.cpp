@@ -1,10 +1,12 @@
+#pragma once
 #include "msg2struct.hpp"
 
 struct Msg {
     int a;
+    int ra;
     float b;
     bool c;
-    MSG_2_STRUCT(a, b, c);
+    MSG_2_STRUCT(a, ra, b, c);
 };
 
 struct Msg2 : Msg {
@@ -24,6 +26,7 @@ int main() {
     unsigned char buff[200];
     Msg3 msg;
     msg.a = -23;
+    msg.ra = 0xc0;
     msg.b = 1.5;
     msg.c = true;
     msg.string = {"hello", 5};
@@ -31,7 +34,7 @@ int main() {
     Msg3 msgBack;
     msg2struct::OutIterator oit(buff, sizeof(buff));
     auto outOk = msg2struct::Dump(msg, oit);
-    msg2struct::InIterator it(buff, sizeof(buff));
+    msg2struct::InIterator it(buff, oit.Written());
     auto ok = msg2struct::Parse(msgBack, it);
     return !(ok && outOk);
 }

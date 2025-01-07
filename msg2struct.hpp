@@ -162,6 +162,8 @@ inline size_t nonCompositeSizeof(Headers type) {
     case Headers::bin8:
     case Headers::ext8:
     case Headers::str8:
+    case Headers::uint8:
+    case Headers::int8:
     case Headers::fixext1:
         return 2; //type + trivial 1-byte
     case Headers::bin16:
@@ -247,9 +249,9 @@ bool getTrivialWith(U& out, const unsigned char* data, size_t size) {
 template<typename SizeT, size_t add = 0>
 void getComposite(Binary& result, const unsigned char* data, size_t size) {
     SizeT sz;
-    if (size <= 1 + sizeof(sz) + add) return;
+    if (size < 1 + sizeof(sz) + add) return;
     impl::getTrivial(sz, data + 1);
-    if (size <= 1 + sizeof(sz) + sz + add) return;
+    if (size < 1 + sizeof(sz) + sz + add) return;
     result.data = data + sizeof(sz) + 1 + add;
     result.size = sz + add;
 }
@@ -318,7 +320,7 @@ public:
 #endif
         case Headers::fixstr: {
             size_t len = data[0] & 31;
-            if (size <= len) return result;
+            if (size < len) return result;
             result.data = data + 1;
             result.size = len;
             break;
@@ -353,15 +355,15 @@ public:
         switch(type) {
         case Headers::fixuint: {
             out = T(uint8_t(data[0]));
-            advance(1);
-            return true;
+            ok = true;
+            break;
         }
         case Headers::fixint: {
             auto v = int8_t(data[0]);
             out = T(v);
             if (out > 0 != v > 0) return false;
-            advance(1);
-            return true;
+            ok = true;
+            break;
         }
         case Headers::uint8: {
             ok = impl::getTrivialWith<uint8_t>(out, data, size);
@@ -427,7 +429,7 @@ public:
         switch(type) {
         case Headers::array16: {
             uint16_t sz;
-            if (size <= 2) return false;
+            if (size < 3) return false;
             impl::getTrivial(sz, data);
             advance(3);
             res = size_t(sz);
@@ -435,7 +437,7 @@ public:
         }
         case Headers::array32: {
             uint32_t sz;
-            if (size <= 4) return false;
+            if (size < 5) return false;
             impl::getTrivial(sz, data);
             advance(5);
             res = size_t(sz);
