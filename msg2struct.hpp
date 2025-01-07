@@ -423,30 +423,32 @@ public:
         }
     }
 
-    size_t GetArraySize() noexcept {
+    bool GetArraySize(size_t& res) noexcept {
         switch(type) {
         case Headers::array16: {
             uint16_t sz;
-            if (size <= 2) return size_t(-1);
+            if (size <= 2) return false;
             impl::getTrivial(sz, data);
             advance(3);
-            return size_t(sz);
+            res = size_t(sz);
+            return true;
         }
         case Headers::array32: {
             uint32_t sz;
-            if (size <= 4) return size_t(-1);
+            if (size <= 4) return false;
             impl::getTrivial(sz, data);
             advance(5);
-            return size_t(sz);
+            res = size_t(sz);
+            return true;
         }
         case Headers::fixarray: {
-            if (!size) return size_t(-1);
-            auto res = size_t(data[0] & 15);
+            if (!size) return false;
+            res = size_t(data[0] & 15);
             advance(1);
-            return res;
+            return true;
         }
         default:
-            return size_t(-1);
+            return false;
         }
     }
 
@@ -696,7 +698,8 @@ bool Parse(T& val, InIterator& it, bool fromChild = false) {
     size_t tail = 0;
     if (!fromChild) {
         auto fs = impl::countFields(val);
-        auto sz = it.GetArraySize();
+        size_t sz;
+        if (!it.GetArraySize(sz)) return false;
         if (sz < fs) return false;
         tail = sz - fs;
     }
@@ -715,7 +718,8 @@ bool Parse(T& val, InIterator& it, bool fromChild = false) {
     size_t tail = 0;
     if (!fromChild) {
         auto fs = impl::countFields(val);
-        auto sz = it.GetArraySize();
+        size_t sz;
+        if (!it.GetArraySize(sz)) return false;
         if (sz < fs) return false;
         tail = sz - fs;
     }
