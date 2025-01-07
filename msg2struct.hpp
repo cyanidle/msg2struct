@@ -329,6 +329,20 @@ public:
         return result;
     }
 
+    bool GetBool(bool& out) noexcept {
+        auto ok = type == Headers::htrue ? (out = true)
+               : type == Headers::hfalse ? !(out = false)
+                                         : false;
+        if (ok) advance(1);
+        return ok;
+    }
+
+    bool GetNil() noexcept {
+        bool ok = type == Headers::nil;
+        if (ok) advance(1);
+        return ok;
+    }
+
     template<typename T>
     _FLATTEN bool GetInteger(T& out) noexcept {
         bool ok = false;
@@ -464,6 +478,15 @@ void writeTrivialUnch(T val, unsigned char*& buffer, size_t& size) {
     size -= sizeof(T);
 }
 
+inline bool writeType(unsigned char type, unsigned char*& buffer, size_t& size) {
+    constexpr int step = 1;
+    if (size < step) return false;
+    buffer[0] = type;
+    buffer += 1;
+    size -= 1;
+    return true;
+}
+
 template<typename T>
 bool writeTypedTrivial(unsigned char type, T val, unsigned char*& buffer, size_t& size) {
     constexpr int step = sizeof(T) + 1;
@@ -589,6 +612,12 @@ public:
     bool WriteFloat(double value) noexcept {
         return impl::writeTypedTrivial(0xcb, value, buffer, size);
     }
+    bool WriteNil() noexcept {
+        return impl::writeType(0xc0, buffer, size);
+    }
+    bool WriteBool(bool value) noexcept {
+        return impl::writeType(value ? 0xc2 : 0xc3, buffer, size);
+    }
     template<typename T>
     bool WriteInteger(T value) noexcept {
         if (!(value >= 0)) {
@@ -704,6 +733,10 @@ inline bool Parse(float& val, InIterator& it) {
     return it.GetFloat(val);
 }
 
+inline bool Parse(bool& val, InIterator& it) {
+    return it.GetBool(val);
+}
+
 inline bool Parse(double& val, InIterator& it) {
     return it.GetFloat(val);
 }
@@ -779,6 +812,10 @@ bool Dump(T const& val, OutIterator& it, bool fromChild = false) {
 template<typename T, typename is_int<T>::type = 1>
 bool Dump(T val, OutIterator& it) {
     return it.WriteInteger(val);
+}
+
+inline bool Dump(bool val, OutIterator& it) {
+    return it.WriteBool(val);
 }
 
 inline bool Dump(float val, OutIterator& it) {

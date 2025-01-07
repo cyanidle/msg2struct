@@ -3,7 +3,8 @@
 struct Msg {
     int a;
     float b;
-    MSG_2_STRUCT(a, b);
+    bool c;
+    MSG_2_STRUCT(a, b, c);
 };
 
 struct Msg2 : Msg {
@@ -24,6 +25,7 @@ int main() {
     Msg3 msg;
     msg.a = -23;
     msg.b = 1.5;
+    msg.c = true;
     msg.string = {"hello", 5};
     msg.bin = {(const unsigned char*)"world", 5};
     Msg3 msgBack;
