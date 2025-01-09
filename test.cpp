@@ -1,4 +1,4 @@
-#pragma once
+
 #include "msg2struct.hpp"
 
 struct Msg {
@@ -36,5 +36,5 @@ int main() {
     auto outOk = msg2struct::Dump(msg, oit);
     msg2struct::InIterator it(buff, oit.Written());
     auto ok = msg2struct::Parse(msgBack, it);
-    return !(ok && outOk);
+    return !ok && ok == outOk;
 }
