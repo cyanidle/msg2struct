@@ -3,7 +3,7 @@
 
 struct Msg {
     int a;
-    int ra;
+    unsigned ra;
     float b;
     bool c;
     MSG_2_STRUCT(a, ra, b, c);
@@ -25,8 +25,8 @@ struct Msg3 : Msg2 {
 int main() {
     unsigned char buff[200];
     Msg3 msg;
-    msg.a = -23;
-    msg.ra = 0xc0;
+    msg.a = 0xc0;
+    msg.ra = 100000;
     msg.b = 1.5;
     msg.c = true;
     msg.string = {"hello", 5};
